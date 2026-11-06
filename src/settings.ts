@@ -22,6 +22,15 @@ export interface StickyRecord
     autoName?: string; // file name we generated; renamed with the first line until the user renames it
 }
 
+export interface WorkItemRecord
+{
+    project: string; // project id
+    rest: string; // hash of everything Plane sent except the state
+    state: string; // state name at the last sync (what Plane has, as far as we know)
+    body: string; // hash of the description at the last sync
+    autoName?: string; // file name we generated; renamed with the title until the user renames it
+}
+
 export interface Settings
 {
     tokenSecret: string; // name of the secret in Obsidian's secret storage, never the token itself
@@ -38,6 +47,12 @@ export interface Settings
     stickiesFolder: string;
     stickyPullMinutes: number;
     stickies: Record<string, StickyRecord>; // sticky id -> sync state
+    workItemsEnabled: boolean;
+    workItemsFolder: string;
+    workItemsPush: boolean;
+    workItemPullMinutes: number;
+    workItems: Record<string, WorkItemRecord>; // work item id -> sync state
+    workItemBoards: Record<string, { hash: string; }>; // project id -> hash of the board file we wrote
 }
 
 export const PLANE_CLOUD_API = "https://api.plane.so";
@@ -59,6 +74,12 @@ export const DEFAULTS: Settings = {
     stickiesFolder: "Plane/Stickies",
     stickyPullMinutes: 2,
     stickies: {},
+    workItemsEnabled: false,
+    workItemsFolder: "Plane Work Items",
+    workItemsPush: false,
+    workItemPullMinutes: 5,
+    workItems: {},
+    workItemBoards: {},
 };
 
 interface LegacySettings
@@ -79,6 +100,8 @@ export function loadSettings(app: App, raw: unknown): { settings: Settings; migr
         links: { ...rest.links },
         pages: { ...rest.pages },
         stickies: { ...rest.stickies },
+        workItems: { ...rest.workItems },
+        workItemBoards: { ...rest.workItemBoards },
     };
     let migrated = false;
 
@@ -162,6 +185,18 @@ export class PlaneSettingTab extends PluginSettingTab
         if (key === "stickyPullMinutes")
         {
             this.plugin.restartStickyTimer();
+        }
+        if (key === "workItemsFolder" && typeof value === "string")
+        {
+            s[key] = value.trim().replace(/\/+$/, "");
+        }
+        if (key === "workItemPullMinutes")
+        {
+            this.plugin.restartWorkItemTimer();
+        }
+        if ((key === "workItemsEnabled" && value === true) || key === "workItemsFolder")
+        {
+            void this.plugin.workItems.pull();
         }
         if ((key === "stickiesEnabled" && value === true) || key === "stickiesFolder")
         {
@@ -383,6 +418,64 @@ export class PlaneSettingTab extends PluginSettingTab
                                     .setButtonText("Open board")
                                     .setDisabled(!s.stickiesEnabled)
                                     .onClick(() => void this.plugin.openStickyBoard())
+                            );
+                        },
+                    },
+                ],
+            },
+            {
+                type: "group",
+                heading: "Work items",
+                items: [
+                    {
+                        name: "Sync work items",
+                        desc:
+                            "Bring the work items of every linked project into your vault as notes, with a kanban board per project. Boards need Obsidian 1.14 or later.",
+                        aliases: ["issues", "kanban", "tasks"],
+                        control: { type: "toggle", key: "workItemsEnabled" },
+                    },
+                    {
+                        name: "Work items folder",
+                        desc: "Each project gets a subfolder here with one note per work item and its Board file.",
+                        control: {
+                            disabled: () => !s.workItemsEnabled,
+                            type: "folder",
+                            key: "workItemsFolder",
+                            placeholder: "Plane Work Items",
+                            validate: (v) => v.trim() ? undefined : "Choose a folder for your work items.",
+                        },
+                    },
+                    {
+                        name: "Send changes to Plane",
+                        desc:
+                            "Moving a card (or changing plane_state) changes the work item's state in Plane, and a new note in a project's folder becomes a new work item. Off: moves are put back and new notes stay local. Titles, descriptions and other fields of existing work items stay read-only.",
+                        aliases: ["write", "two-way", "push board moves", "create"],
+                        control: { type: "toggle", key: "workItemsPush", disabled: () => !s.workItemsEnabled },
+                    },
+                    {
+                        name: "Check Plane for changes",
+                        desc: "How often to fetch work items changed in Plane.",
+                        aliases: ["interval", "pull"],
+                        control: {
+                            type: "slider",
+                            key: "workItemPullMinutes",
+                            min: 1,
+                            max: 60,
+                            step: 1,
+                            displayFormat: (v: number) => (v === 1 ? "every minute" : `every ${v} min`),
+                            disabled: () => !s.workItemsEnabled,
+                        },
+                    },
+                    {
+                        name: "Board",
+                        desc: "Open the kanban board for a linked project.",
+                        render: (setting) =>
+                        {
+                            setting.addButton((button) =>
+                                button
+                                    .setButtonText("Open board")
+                                    .setDisabled(!s.workItemsEnabled || !this.plugin.configured)
+                                    .onClick(() => void this.plugin.openBoard())
                             );
                         },
                     },

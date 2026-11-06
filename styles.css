@@ -95,3 +95,285 @@
     color: var(--text-muted);
     font-size: var(--font-ui-small);
 }
+
+/* Plane Sync: work item board
+   Cards on the Board.base files contain a .pps-wi row (rendered by the board's "card" formula).
+   Everything below is scoped to it, so other Bases boards are left alone. */
+
+body {
+    --pps-backlog: #a1a1aa;
+    --pps-unstarted: #8b8d98;
+    --pps-started: #f59e0b;
+    --pps-completed: #46a758;
+    --pps-cancelled: #e5484d;
+    --pps-urgent: #e5484d;
+    --pps-high: #f76b15;
+    --pps-medium: #f5b400;
+    --pps-low: #3e8ef7;
+}
+
+/* The card: a state-coloured edge, like Plane's board. */
+.bases-kanban-card:has(.pps-wi) {
+    --pps-edge: var(--pps-unstarted);
+    box-shadow: inset 3px 0 0 var(--pps-edge), var(--bases-kanban-card-shadow);
+}
+.bases-kanban-card:has(.pps-wi):hover {
+    box-shadow: inset 3px 0 0 var(--pps-edge), var(--bases-kanban-card-shadow-hover);
+}
+.bases-kanban-card:has(.pps-wi):focus-visible {
+    box-shadow: inset 3px 0 0 var(--pps-edge), var(--bases-kanban-card-shadow-focus);
+}
+.bases-kanban-card:has(.pps-wi[data-group="backlog"]) {
+    --pps-edge: var(--pps-backlog);
+}
+.bases-kanban-card:has(.pps-wi[data-group="started"]) {
+    --pps-edge: var(--pps-started);
+}
+.bases-kanban-card:has(.pps-wi[data-group="completed"]) {
+    --pps-edge: var(--pps-completed);
+}
+.bases-kanban-card:has(.pps-wi[data-group="cancelled"]) {
+    --pps-edge: var(--pps-cancelled);
+}
+
+/* Finished work reads quieter. */
+.bases-kanban-card:has(.pps-wi[data-group="completed"]) .mod-title .bases-kanban-card-line {
+    color: var(--text-muted);
+}
+.bases-kanban-card:has(.pps-wi[data-group="cancelled"]) .mod-title .bases-kanban-card-line {
+    color: var(--text-faint);
+    text-decoration: line-through;
+}
+
+/* On narrow cards, drop the key first, then labels, so dates and people stay visible. */
+.bases-kanban-card-property:has(.pps-wi) .bases-kanban-card-line {
+    container-type: inline-size;
+}
+.pps-wi:has(.pps-wi-due):has(.pps-wi-label):has(.pps-wi-avatar) .pps-wi-key {
+    display: none;
+}
+@container (max-width: 250px) {
+    .pps-wi-key {
+        display: none;
+    }
+}
+@container (max-width: 200px) {
+    .pps-wi-label,
+    .pps-wi-more {
+        display: none;
+    }
+}
+
+/* The chip row takes the space of its (hidden) label, centred. */
+.bases-kanban-card-property:has(.pps-wi) .bases-kanban-card-label {
+    display: none;
+}
+.bases-kanban-card-property:has(.pps-wi) .bases-kanban-card-line {
+    height: 100%;
+    display: flex;
+    align-items: center;
+}
+
+.pps-wi {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    font-size: var(--font-ui-smaller);
+    line-height: 1;
+    color: var(--text-muted);
+}
+.pps-wi > * {
+    flex-shrink: 0;
+}
+.pps-wi-spacer {
+    flex: 1 1 auto;
+    flex-shrink: 1;
+}
+
+/* Priority: Plane's signal bars, and a red "!" for urgent. */
+.pps-wi-priority {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 1.5px;
+    width: 16px;
+    height: 16px;
+    padding: 3px 2px;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+.pps-wi-priority i {
+    display: block;
+    width: 3px;
+    border-radius: 1px;
+    background-color: var(--background-modifier-border-hover);
+}
+.pps-wi-priority i:nth-child(1) {
+    height: 4px;
+}
+.pps-wi-priority i:nth-child(2) {
+    height: 7px;
+}
+.pps-wi-priority i:nth-child(3) {
+    height: 10px;
+}
+.pps-wi[data-priority="low"] .pps-wi-priority i:nth-child(-n + 1) {
+    background-color: var(--pps-low);
+}
+.pps-wi[data-priority="medium"] .pps-wi-priority i:nth-child(-n + 2) {
+    background-color: var(--pps-medium);
+}
+.pps-wi[data-priority="high"] .pps-wi-priority i {
+    background-color: var(--pps-high);
+}
+.pps-wi[data-priority="urgent"] .pps-wi-priority {
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background-color: var(--pps-urgent);
+}
+.pps-wi[data-priority="urgent"] .pps-wi-priority i {
+    display: none;
+}
+.pps-wi[data-priority="urgent"] .pps-wi-priority::before {
+    content: "!";
+    color: #fff;
+    font-weight: 700;
+    font-size: 11px;
+}
+
+.pps-wi-key {
+    font-family: var(--font-monospace);
+    font-size: calc(var(--font-ui-smaller) * 0.95);
+    color: var(--text-faint);
+    letter-spacing: 0.01em;
+}
+
+.pps-wi-due,
+.pps-wi-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: 999px;
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.pps-wi-due::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border: 1.3px solid currentColor;
+    border-top-width: 2.5px;
+    border-radius: 2px;
+    box-sizing: border-box;
+    opacity: 0.8;
+}
+.pps-wi-due.is-overdue {
+    color: var(--pps-urgent);
+    border-color: color-mix(in srgb, var(--pps-urgent) 45%, transparent);
+    background-color: color-mix(in srgb, var(--pps-urgent) 10%, transparent);
+}
+.pps-wi-label {
+    display: inline-block;
+    line-height: 16px;
+    max-width: 110px;
+    min-width: 56px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 1;
+}
+.pps-wi-more {
+    color: var(--text-faint);
+    font-size: calc(var(--font-ui-smaller) * 0.95);
+}
+.pps-wi-label::before {
+    content: "";
+    display: inline-block;
+    vertical-align: 1px;
+    margin-inline-end: 4px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--interactive-accent);
+}
+
+/* Assignees: overlapping initials, full name on hover. */
+.pps-wi-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    margin-inline-start: -10px;
+    border-radius: 50%;
+    background-color: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-primary));
+    color: var(--text-normal);
+    font-size: 10px;
+    font-weight: 600;
+    box-shadow: 0 0 0 2px var(--bases-kanban-card-background);
+}
+.pps-wi-spacer + .pps-wi-avatar {
+    margin-inline-start: 0;
+}
+/* A colour per initial, so the same person always looks the same. */
+.pps-wi-avatar:is([data-i="A"], [data-i="G"], [data-i="M"], [data-i="S"], [data-i="Y"]) {
+    --pps-av: #8e4ec6;
+}
+.pps-wi-avatar:is([data-i="B"], [data-i="H"], [data-i="N"], [data-i="T"], [data-i="Z"]) {
+    --pps-av: #0090ff;
+}
+.pps-wi-avatar:is([data-i="C"], [data-i="I"], [data-i="O"], [data-i="U"]) {
+    --pps-av: #12a594;
+}
+.pps-wi-avatar:is([data-i="D"], [data-i="J"], [data-i="P"], [data-i="V"]) {
+    --pps-av: #e54666;
+}
+.pps-wi-avatar:is([data-i="E"], [data-i="K"], [data-i="Q"], [data-i="W"]) {
+    --pps-av: #f76b15;
+}
+.pps-wi-avatar:is([data-i="F"], [data-i="L"], [data-i="R"], [data-i="X"]) {
+    --pps-av: #3e63dd;
+}
+.pps-wi-avatar[data-i] {
+    background-color: color-mix(in srgb, var(--pps-av, var(--interactive-accent)) 30%, var(--background-primary));
+}
+
+/* Column headers: Plane's state icons. Empty columns get a plain circle. */
+.bases-kanban-container:has(.pps-wi) .bases-kanban-column-header .bases-group-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.bases-kanban-container:has(.pps-wi) .bases-kanban-column-header .bases-group-heading::before {
+    content: "";
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    box-sizing: border-box;
+    border: 1.5px solid var(--pps-unstarted);
+}
+.bases-kanban-column:has(.pps-wi[data-group="backlog"]) .bases-group-heading::before {
+    border: 1.5px dashed var(--pps-backlog);
+}
+.bases-kanban-column:has(.pps-wi[data-group="started"]) .bases-group-heading::before {
+    border-color: var(--pps-started);
+    background: conic-gradient(var(--pps-started) 0 50%, transparent 50% 100%);
+    background-clip: content-box;
+    padding: 1.5px;
+}
+.bases-kanban-column:has(.pps-wi[data-group="completed"]) .bases-group-heading::before {
+    border-color: var(--pps-completed);
+    background-color: var(--pps-completed);
+    box-shadow: inset 0 0 0 1.5px var(--background-primary-alt);
+}
+.bases-kanban-column:has(.pps-wi[data-group="cancelled"]) .bases-group-heading::before {
+    border-color: var(--pps-cancelled);
+    background:
+        linear-gradient(45deg, transparent 44%, var(--pps-cancelled) 44% 56%, transparent 56%),
+        linear-gradient(-45deg, transparent 44%, var(--pps-cancelled) 44% 56%, transparent 56%);
+}

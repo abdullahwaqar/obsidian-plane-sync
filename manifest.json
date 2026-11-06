@@ -3,7 +3,7 @@
     "name": "Plane Sync",
     "version": "1.4.1",
     "minAppVersion": "1.13.2",
-    "description": "Publish project folders as Plane pages and keep your Plane stickies in sync.",
+    "description": "Publish project folders as Plane pages, keep your Plane stickies in sync, and see work items on a kanban board.",
     "author": "Abdullah Waqar",
     "authorUrl": "https://abdullahwaqar.com",
     "isDesktopOnly": false

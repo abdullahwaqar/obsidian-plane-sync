@@ -6,6 +6,7 @@ import {
     Notice,
     normalizePath,
     Plugin,
+    requireApiVersion,
     type TAbstractFile,
     TFile,
     TFolder,
@@ -16,6 +17,7 @@ import { type FolderLink, loadSettings, PLANE_CLOUD_API, PlaneSettingTab, type S
 import { StickySync } from "./stickies";
 import { ConfirmCleanup, STICKY_VIEW, StickyBoardView } from "./stickyView";
 import { errorMessage, hash, isInFolder, withLock } from "./util";
+import { WorkItemSync } from "./workItems";
 
 const FM_PAGE = "plane_page";
 const FM_PROJECT = "plane_project";
@@ -35,7 +37,9 @@ export default class PlanePagesSync extends Plugin
     settings!: Settings;
     client!: PlaneClient;
     stickies!: StickySync;
+    workItems!: WorkItemSync;
     private stickyTimer: number | null = null;
+    private workItemTimer: number | null = null;
     private lastFocusPull = 0;
     private projects: PlaneProject[] | null = null;
     private timers = new Map<string, number>();
@@ -54,6 +58,7 @@ export default class PlanePagesSync extends Plugin
         }));
 
         this.stickies = new StickySync(this);
+        this.workItems = new WorkItemSync(this);
         this.registerView(STICKY_VIEW, (leaf) => new StickyBoardView(leaf, this));
 
         this.statusEl = this.addStatusBarItem();
@@ -87,18 +92,22 @@ export default class PlanePagesSync extends Plugin
                 if (f instanceof TFile)
                 {
                     this.stickies.onCreate(f);
+                    this.workItems.onModify(f);
                 }
             }));
 
             // Stickies: pull on start, on a timer, and when you come back to Obsidian (e.g. after editing in Plane).
             this.restartStickyTimer();
             void this.stickies.pull({ quiet: true });
+            this.restartWorkItemTimer();
+            void this.workItems.pull({ quiet: true });
             this.registerDomEvent(window, "focus", () =>
             {
                 if (Date.now() - this.lastFocusPull > 30_000)
                 {
                     this.lastFocusPull = Date.now();
                     void this.stickies.pull({ quiet: true });
+                    void this.workItems.pull({ quiet: true });
                 }
             });
         });
@@ -107,9 +116,14 @@ export default class PlanePagesSync extends Plugin
     onunload()
     {
         this.stickies?.destroy();
+        this.workItems?.destroy();
         if (this.stickyTimer !== null)
         {
             window.clearInterval(this.stickyTimer);
+        }
+        if (this.workItemTimer !== null)
+        {
+            window.clearInterval(this.workItemTimer);
         }
         for (const t of this.timers.values())
         {
@@ -126,6 +140,69 @@ export default class PlanePagesSync extends Plugin
         const minutes = Math.max(1, this.settings.stickyPullMinutes);
         this.stickyTimer = window.setInterval(() => void this.stickies.pull({ quiet: true }), minutes * 60_000);
         this.registerInterval(this.stickyTimer);
+    }
+
+    restartWorkItemTimer()
+    {
+        if (this.workItemTimer !== null)
+        {
+            window.clearInterval(this.workItemTimer);
+        }
+        const minutes = Math.max(1, this.settings.workItemPullMinutes);
+        this.workItemTimer = window.setInterval(() => void this.workItems.pull({ quiet: true }), minutes * 60_000);
+        this.registerInterval(this.workItemTimer);
+    }
+
+    /** Opens the kanban board for a linked project, asking which one if there are several. */
+    openBoard()
+    {
+        if (!this.configured)
+        {
+            return new Notice("Add your Plane token and workspace in this plugin's settings first.");
+        }
+        if (!requireApiVersion("1.14.0"))
+        {
+            return new Notice("Boards need Obsidian 1.14 or later. Your work item notes are still synced.");
+        }
+        if (!this.settings.workItemsEnabled)
+        {
+            return new Notice("Turn on work item sync in this plugin's settings first.");
+        }
+        const links = this.workItems.linkedProjects();
+        if (!links.length)
+        {
+            return new Notice("Link a folder to a Plane project first. Boards are made for linked projects.");
+        }
+        const open = async (link: FolderLink) =>
+        {
+            const notice = new Notice(`Loading work items for ${link.projectName}…`, 0);
+            try
+            {
+                const file = await this.workItems.boardFor(link);
+                notice.hide();
+                if (file)
+                {
+                    await this.app.workspace.getLeaf("tab").openFile(file);
+                }
+                else
+                {
+                    new Notice(`Couldn't make a board for ${link.projectName}. ${this.workItems.lastError}`, 8000);
+                }
+            }
+            catch (e)
+            {
+                notice.hide();
+                new Notice(`Couldn't open the board: ${errorMessage(e)}`, 8000);
+            }
+        };
+        if (links.length === 1)
+        {
+            void open(links[0]);
+        }
+        else
+        {
+            new LinkedProjectModal(this.app, links, (l) => void open(l)).open();
+        }
     }
 
     async cleanUpStickies()
@@ -276,7 +353,7 @@ export default class PlanePagesSync extends Plugin
     /** Nearest linked ancestor folder, or auto-link a folder under the root that matches a project name. */
     async projectFor(file: TFile): Promise<FolderLink | null>
     {
-        if (this.stickies.isStickyFile(file))
+        if (this.isManaged(file))
         {
             return null;
         }
@@ -317,16 +394,24 @@ export default class PlanePagesSync extends Plugin
         return link;
     }
 
+    /** Stickies and work item notes belong to their own sync, never to the page sync. */
+    private isManaged(file: TFile)
+    {
+        return this.stickies.isStickyFile(file) || this.workItems.isWorkItemFile(file);
+    }
+
     linkFolder(folder: TFolder, project: PlaneProject)
     {
-        const stickies = this.stickies.folder;
-        if (
-            stickies
-            && (folder.path === stickies || isInFolder(folder.path, stickies) || isInFolder(stickies, folder.path))
-        )
+        for (const [what, other] of [["stickies", this.stickies.folder], ["work items", this.workItems.folder]])
         {
-            new Notice("That folder holds your stickies, so it can't be linked to a project as well.");
-            return;
+            if (
+                other
+                && (folder.path === other || isInFolder(folder.path, other) || isInFolder(other, folder.path))
+            )
+            {
+                new Notice(`That folder holds your ${what}, so it can't be linked to a project as well.`);
+                return;
+            }
         }
         // Drop links on descendants so the new link wins for the whole subtree.
         for (const p of Object.keys(this.settings.links))
@@ -511,7 +596,7 @@ export default class PlanePagesSync extends Plugin
         const root = normalizePath(this.settings.rootFolder || "");
         const linked = Object.keys(this.settings.links);
         return this.app.vault.getMarkdownFiles().filter((f) =>
-            !this.stickies.isStickyFile(f)
+            !this.isManaged(f)
             && (linked.some((p) => f.path.startsWith(`${p}/`)) || (root && f.path.startsWith(`${root}/`)))
         );
     }
@@ -561,7 +646,7 @@ export default class PlanePagesSync extends Plugin
 
     private isTracked(file: TFile)
     {
-        if (this.stickies.isStickyFile(file))
+        if (this.isManaged(file))
         {
             return false;
         }
@@ -605,6 +690,11 @@ export default class PlanePagesSync extends Plugin
             this.stickies.onModify(f);
             return;
         }
+        if (f instanceof TFile && this.workItems.isWorkItemFile(f))
+        {
+            this.workItems.onModify(f);
+            return;
+        }
         if (!this.settings.autoPush || !this.configured)
         {
             return;
@@ -642,6 +732,11 @@ export default class PlanePagesSync extends Plugin
             {
                 this.settings.stickiesFolder = f.path + stickies.slice(oldPath.length);
             }
+            const items = this.workItems.folder;
+            if (items === oldPath || isInFolder(items, oldPath))
+            {
+                this.settings.workItemsFolder = f.path + items.slice(oldPath.length);
+            }
             for (const rec of Object.values(this.settings.stickies))
             {
                 if (isInFolder(rec.path, oldPath))
@@ -659,6 +754,12 @@ export default class PlanePagesSync extends Plugin
         if (this.stickies.isStickyFile(f) || isInFolder(oldPath, this.stickies.folder))
         {
             this.stickies.onRename(f, oldPath);
+            return;
+        }
+        if (this.workItems.isWorkItemFile(f) || isInFolder(oldPath, this.workItems.folder))
+        {
+            // A note renamed from "Untitled" (or moved into a project folder) may now be ready to create.
+            this.workItems.onModify(f);
             return;
         }
         const rec = this.settings.pages[oldPath];
@@ -749,6 +850,12 @@ export default class PlanePagesSync extends Plugin
             name: "Open sticky board",
             callback: () => void this.openStickyBoard(),
         });
+        this.addCommand({
+            id: "sync-work-items",
+            name: "Sync work items now",
+            callback: () => void this.workItems.pull(),
+        });
+        this.addCommand({ id: "open-board", name: "Open work item board", callback: () => void this.openBoard() });
         this.addCommand({
             id: "clean-up-stickies",
             name: "Clean up duplicate stickies",
@@ -923,6 +1030,27 @@ export default class PlanePagesSync extends Plugin
             .catch((e: unknown) =>
                 new Notice(`Couldn't load Plane projects: ${e instanceof Error ? e.message : String(e)}`, 8000)
             );
+    }
+}
+
+class LinkedProjectModal extends FuzzySuggestModal<FolderLink>
+{
+    constructor(app: App, private links: FolderLink[], private onPick: (l: FolderLink) => void)
+    {
+        super(app);
+        this.setPlaceholder("Pick a project");
+    }
+    getItems()
+    {
+        return this.links;
+    }
+    getItemText(l: FolderLink)
+    {
+        return l.projectName;
+    }
+    onChooseItem(l: FolderLink)
+    {
+        this.onPick(l);
     }
 }
 

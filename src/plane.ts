@@ -25,6 +25,36 @@ export interface StickyInput
     background_color?: string;
 }
 
+export interface PlaneState
+{
+    id: string;
+    name: string;
+    group?: string; // backlog | unstarted | started | completed | cancelled
+    color?: string;
+    sequence?: number;
+    default?: boolean;
+}
+
+type Person = string | { id?: string; display_name?: string; first_name?: string; last_name?: string; email?: string; };
+
+export interface PlaneWorkItem
+{
+    id: string;
+    name: string;
+    sequence_id?: number;
+    description_html?: string | null;
+    description_stripped?: string | null;
+    priority?: string | null;
+    // Plane returns the state as an id, or as an object when expanded.
+    state?: string | { id?: string; name?: string; group?: string; } | null;
+    assignees?: Person[] | null;
+    labels?: Array<string | { id?: string; name?: string; }> | null;
+    target_date?: string | null;
+    updated_at?: string;
+    archived_at?: string | null;
+    is_draft?: boolean;
+}
+
 type Paginated<T> = { results?: T[]; next_page_results?: boolean; next_cursor?: string; } | T[];
 
 export interface PlanePage
@@ -51,6 +81,7 @@ export class PlaneClient
 {
     private chain: Promise<unknown> = Promise.resolve();
     private last = 0;
+    private itemsSegment = "work-items"; // older self-hosted versions call them "issues"
 
     constructor(private cfg: () => { apiBase: string; apiKey: string; workspace: string; })
     {}
@@ -170,6 +201,62 @@ export class PlaneClient
     deleteSticky(id: string)
     {
         return this.request<void>("DELETE", `/stickies/${id}/`);
+    }
+
+    listStates(projectId: string): Promise<PlaneState[]>
+    {
+        return this.listAll<PlaneState>(`/projects/${projectId}/states/`);
+    }
+
+    /** Work items with their state, assignees and labels expanded. Falls back for servers that don't support that. */
+    async listWorkItems(projectId: string): Promise<PlaneWorkItem[]>
+    {
+        const path = () => `/projects/${projectId}/${this.itemsSegment}/`;
+        try
+        {
+            return await this.listAll<PlaneWorkItem>(`${path()}?expand=state,assignees,labels`);
+        }
+        catch (e)
+        {
+            if (!(e instanceof PlaneError))
+            {
+                throw e;
+            }
+            if (e.status === 404 && this.itemsSegment === "work-items")
+            {
+                this.itemsSegment = "issues";
+                return this.listWorkItems(projectId);
+            }
+            if (e.status === 400)
+            {
+                return this.listAll<PlaneWorkItem>(path());
+            }
+            throw e;
+        }
+    }
+
+    createWorkItem(
+        projectId: string,
+        input: {
+            name: string;
+            description_html?: string;
+            state?: string;
+            priority?: string;
+            external_id?: string;
+            external_source?: string;
+        },
+    )
+    {
+        return this.request<PlaneWorkItem>("POST", `/projects/${projectId}/${this.itemsSegment}/`, input);
+    }
+
+    updateWorkItem(projectId: string, workItemId: string, input: { state: string; })
+    {
+        return this.request<PlaneWorkItem>(
+            "PATCH",
+            `/projects/${projectId}/${this.itemsSegment}/${workItemId}/`,
+            input,
+        );
     }
 
     createPage(projectId: string, name: string, html: string, externalId: string)
