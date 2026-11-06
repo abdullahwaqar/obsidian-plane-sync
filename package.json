@@ -1,6 +1,6 @@
 {
     "name": "obsidian-plane-sync",
-    "version": "1.4.1",
+    "version": "1.5.0",
     "description": "Obsidian plugin that publish project folders as Plane pages and keep your Plane stickies in sync.",
     "keywords": [],
     "repository": {
